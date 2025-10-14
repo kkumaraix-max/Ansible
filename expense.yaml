@@ -1,0 +1,212 @@
+# - name: expense project -frontend # Frontend
+#   hosts: frontend
+#   become: true
+#   tasks:
+#     - name: install nginx
+#       ansible.builtin.package:
+#         name: nginx
+#         state: present
+#     - name: start
+#       ansible.builtin.service:
+#          name: nginx
+#          state: started  
+#          enabled: true
+#     - name: Display message
+#       ansible.builtin.debug:    
+#        msg: "nginx has been insatlled succesfully"
+#     - name: delete old files
+#       ansible.builtin.command: rm -rf /usr/share/nginx/html/*
+#     - name: downlaod code
+#       ansible.builtin.get_url: 
+#         url: https://expense-joindevops.s3.us-east-1.amazonaws.com/expense-frontend-v2.zip
+#         dest: /tmp/frontend.zip
+#     - name: unzip files
+#       ansible.builtin.unarchive:
+#         src: /tmp/frontend.zip
+#         dest: /usr/share/nginx/html
+#         remote_src: yes
+#     - name: Configure Nginx for Expense project
+#       vars_files:
+#         - =======#################===============
+
+#       ansible.builtin.copy:
+#         dest: /etc/nginx/default.d/expense.conf
+#         content: |
+#           proxy_http_version 1.1;
+
+#           location /api/ { 
+#               proxy_pass http://172.31.31.69:8080/; 
+#           }
+
+#           location /health {
+#               stub_status on;
+#               access_log off;
+#           }
+#         owner: root
+#         group: root
+#         mode: '0644'
+
+#     - name: Reload Nginx to apply configuration
+#       ansible.builtin.service:
+#         name: nginx
+#         state: reloaded    
+
+# - name: expense project - backend #Backend
+#   hosts: backend
+#   become: true
+#   tasks:
+#     - name: disable nodejs
+#       ansible.builtin.shell: dnf module disable nodejs -y
+#     - name:  enable nodejs
+#       ansible.builtin.shell: dnf module enable nodejs:20 -y
+#     - name: install nodejs
+#       ansible.builtin.shell: dnf install nodejs -y
+#     - name: Create 'expense' user
+#       ansible.builtin.user:
+#         name: expense
+#         state: present
+  
+#     - name: Create app directory
+#       ansible.builtin.file:
+#         path: /app
+#         state: directory
+#         owner: expense
+#         group: expense
+#         mode: "0755" 
+#     - name: download packages
+#       ansible.builtin.get_url:
+#         url: https://expense-joindevops.s3.us-east-1.amazonaws.com/expense-backend-v2.zip
+#         dest: /tmp/backend.zip
+#         mode: '0644'
+       
+#     - name: print backend setup cpmpleted
+#       ansible.builtin.debug:
+#         msg: "nodejs setup cpmpleted"
+#     - name: unzip files
+#       ansible.builtin.unarchive:
+#         src: /tmp/backend.zip
+#         dest: /app
+#         remote_src: yes
+#     - name: Install Node.js dependencies
+#       ansible.builtin.command: npm install
+#       args:
+#         chdir: /app
+#       become: true
+#       become_user: expense  
+#     - name: Configure Backend service for Expense project
+#       ansible.builtin.copy:
+#         dest: /etc/systemd/system/backend.service
+#         content: |
+#           [Unit]
+#           Description=Backend Service
+
+#           [Service]
+#           User=expense
+#           Environment=DB_HOST="172.31.17.123"
+#           ExecStart=/bin/node /app/index.js
+#           SyslogIdentifier=backend
+
+#           [Install]
+#           WantedBy=multi-user.target
+#         owner: root
+#         group: root
+#         mode: '0644'
+#     - name: Installing mysql client
+#       ansible.builtin.shell: sudo dnf install mysql -y
+        
+#     - name: Import backend schema
+#       community.mysql.mysql_db:
+#         name: expense_backend
+#         state: import
+#         target: /app/schema/backend.sql
+#         login_user: root
+#         login_password: ExpenseApp@1
+#         login_host: 172.31.29.246
+         
+#     - name: reload backend service
+#       ansible.builtin.systemd:
+#         name: backend
+#         state: started
+#         enabled: true  
+#     - name: Check backend service status
+#       ansible.builtin.systemd:
+#         name: backend
+#         register: backend_status
+
+#     - name: Display backend service status
+#       ansible.builtin.debug:
+#         msg: "Backend service is {{ backend_status.status.ActiveState }}"   
+
+
+# - name: expense project - mysql #MYSQL 
+#   hosts: DB
+#   become: true
+#   tasks:
+#     - name: install mysql
+#       ansible.builtin.package:
+#         name: mysql-server
+#         state: present
+#     - name: start mysqld    
+#       ansible.builtin.service:
+#         name: mysqld
+#         state: started
+#         enabled: true
+    
+#     - name: default root password in order to start using the database service
+#       ansible.builtin.shell: sudo mysql_secure_installation --set-root-pass ExpenseApp@1
+
+
+
+- name: creating instances
+  hosts: local
+  connection: local
+  gather_facts: false
+  vars:
+    ami_id: ami-09c813fb71547fc4f
+    sg_id: sg-0a1153447ef389531
+    domain: "anilkathoju.space"
+    zone_id: "Z096778411CYC46C0VA5Q"
+    instances:
+      - backend
+      - mysql
+      - frontend
+  tasks:
+    - name: Launch EC2 instances
+      amazon.aws.ec2_instance:
+        name: "{{ item }}"
+        instance_type: t3.micro
+        security_group: "{{ sg_id }}"
+        image_id: "{{ ami_id }}"
+        wait: yes
+        state: present
+        tags:
+          Name: "{{ item }}"
+      loop: "{{ instances }}"
+      register: ec2_output
+    - name: Debug EC2 creation output
+      ansible.builtin.debug:
+        var: ec2_output  
+    - name: update r453 record
+      amazon.aws.route53:
+        state: present
+        zone: "{{ domain }}"
+        record: "{{ item.item }}.{{ domain }}"
+        type: A
+        ttl: 60
+        value: "{{ item.instances[0].private_ip_address }}"
+        wait: true
+        overwrite: true
+      loop: "{{ ec2_output.results }}"
+
+    - name: update r53 with public IP in frontend
+      amazon.aws.route53:
+        state: present
+        zone: "{{ domain }}"
+        record: "{{ domain }}"
+        type: A
+        ttl: 60
+        value: "{{ item.instances[0].public_ip_address }}"
+        wait: true
+        overwrite: true
+      when: item.item == "frontend"
+      loop: "{{ ec2_output.results }}"

@@ -1,0 +1,16 @@
+- name: condition
+  hosts: local
+  connection: local
+ # vars:
+ #  number: 3
+  tasks:
+   - name: check given number is less than 100 or not
+     ansible.builtin.debug:
+      msg: "Given number {{ number }} is less than 100"
+     when: number < 100
+   - name: Number is greater than or equal to 100
+     ansible.builtin.debug:
+      msg: "Given number {{ number }} is greater than 100"
+     when: number > 100
+#     ansible-playbook -i inventory.ini -e ansible_user=ec2-user -e ansible_password=DevOps321 -e '{"number":99}' Conditions.yml
+

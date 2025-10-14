@@ -1,0 +1,61 @@
+- name: setup backend
+  hosts: backend
+  become: true
+  tasks:
+    - name: disable nodejs
+      ansible.builtin.command: dnf module disable nodejs -y
+    - name: enable nodejs
+      ansible.builtin.command: dnf module enable nodejs:20 -y
+    - name: install nodejs
+      ansible.builtin.package:
+        name: nodejs
+        state: present
+    - name: create user expense
+      ansible.builtin.user:
+        name: expense
+        comment: user to run app
+    - name: Creating /app
+      ansible.builtin.file:
+        state: directory
+        path: /app
+    - name: download code
+      ansible.builtin.get_url:     
+        url: https://expense-joindevops.s3.us-east-1.amazonaws.com/expense-backend-v2.zip
+        dest: /tmp/backend.zip
+    - name: Extract code
+      ansible.builtin.unarchive:
+        src: /tmp/backend.zip
+        dest: /app
+        remote_src: yes
+    - name: install dependencies
+      community.general.npm:
+        path: /app
+    - name: copy backend service content 
+      ansible.builtin.copy:
+        src: backend.service
+        dest: /etc/systemd/system/backend.service
+
+    - name: install mysql server
+      ansible.builtin.package:
+        name: mysql-server
+        state: present
+
+    - name: check if schema already loaded
+      ansible.builtin.shell: mysql -h 172.31.6.224 -uroot -pExpenseApp@1 -e "show databases like 'expenses';" | wc -l
+      register: backend_output
+
+    - name: load schema
+      ansible.builtin.shell: mysql -h 172.31.6.224 -uroot -pExpenseApp@1 < /app/schema/backend.sql
+      when: backend_output.stdout | int == 0
+
+    - name: enable and start mysql
+      ansible.builtin.service:
+        name: mysqld
+        enabled: true
+        state: started  
+
+    - name: start backend services
+      ansible.builtin.service:
+        name: backend
+        enabled: true
+        state: started

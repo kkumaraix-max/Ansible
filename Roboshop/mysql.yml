@@ -1,0 +1,16 @@
+- name: setup mysql
+  hosts: mysql
+  become: true
+  tasks: 
+    - name:  install mysql-server
+      ansible.builtin.package:
+        name: mysql-server
+        state: present
+    - name: enable and start mysqld
+      ansible.builtin.service:
+        name: mysqld
+        enabled: true
+        state: started
+
+    - name: We need to change the default root password in order to start using the database service 
+      ansible.builtin.command: mysql_secure_installation --set-root-pass RoboShop@1
